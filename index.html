@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>MatchaTone — state videos</title>
+  <link rel="stylesheet" href="style.css"/>
+  <!-- p5 core + sound -->
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.3/lib/p5.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.3/lib/addons/p5.sound.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <div id="loading">Loading…</div>
+    <button id="startBtn">Tap to start</button>
+    <div id="stage"></div>
+    <div id="hud">
+      <span id="stateTxt">state: live</span>
+    </div>
+    <details id="guide" open>
+      <summary>How to Test</summary>
+      <ol>
+        <li>Click <b>Start</b> and allow microphone access.</li>
+        <li>Tap the stage once → <b>Happy</b> for 1.2 s.</li>
+        <li>Clap or make a loud sound → <b>Shy</b> for 1.2 s.</li>
+        <li>Stay quiet or do nothing for 30 s → <b>Sleep</b> mode.</li>
+        <li>Speak or hum softly → stays in <b>Live</b> (awake).</li>
+      </ol>
+      <p><b>Troubleshooting</b></p>
+      <ul>
+        <li>If nothing happens, check microphone permission in your browser.</li>
+        <li>Make sure the correct input device is selected in system settings.</li>
+        <li>Too much background noise may trigger <b>Shy</b> too often.</li>
+        <li>On mobile, keep videos muted for stable autoplay. You can increase media volume manually if needed.</li>
+      </ul>
+    </details>
+  </div>
+  <script src="sketch.js"></script>
+</body>
+</html>
