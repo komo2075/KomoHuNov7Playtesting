@@ -50,3 +50,6 @@ html,body{margin:0;padding:0;background:#f4f7f6;font-family:system-ui;}
 #guide ol,#guide ul{margin:8px 0 0 18px; padding:0;}
 #guide li{margin:4px 0;}
 #guide b{color:#0a7f66;}
+
+/* 新增闭麦按钮样式 */
+#muteBtn.muted{ background:#ffeaea; border-color:#ffb3b3; }

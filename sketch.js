@@ -14,6 +14,7 @@ let shyUntil = 0;
 let happyUntil = 0;
 let allLoaded = false;
 let started = false;
+let isMuted = false;   // 是否闭麦
 
 let sens = 1.0;
 
@@ -66,6 +67,11 @@ function setup(){
   $("micSelect").addEventListener("change", async ()=>{
     if(started) await startMicWithDevice(($("micSelect").value));
   });
+    // 闭麦按钮
+    $("muteBtn").addEventListener("click", toggleMute);
+    window.addEventListener("keydown", (e)=>{
+      if(e.key.toLowerCase() === "m") toggleMute();   // M 键快速开关
+    });
 
   window.addEventListener("pointerdown", resumeAudio, { passive:true });
   window.addEventListener("touchstart", resumeAudio, { passive:true });
@@ -154,23 +160,34 @@ function checkLoaded(){
 }
 
 function draw(){
-  if(!started || !analyser) return;
+  // 没点 Start 就不跑；注意：闭麦时 analyser 会是 null
+  if(!started){
+    return;
+  }
 
   const now = millis();
+  let level = 0;
 
-  // 从 Analyser 读取时域数据，计算 RMS
-  analyser.getFloatTimeDomainData(timeBuf);
-  let sum = 0;
-  for(let i=0;i<timeBuf.length;i++){
-    const x = timeBuf[i];
-    sum += x*x;
+  if(analyser && timeBuf){
+    // 从 Analyser 读取时域数据，计算 RMS
+    analyser.getFloatTimeDomainData(timeBuf);
+    let sum = 0;
+    for(let i=0;i<timeBuf.length;i++){
+      const x = timeBuf[i];
+      sum += x*x;
+    }
+    const rms = Math.sqrt(sum / timeBuf.length);   // 0..~1
+    level = Math.min(1, Math.max(0, rms * sens * 3)); // 放大到直观 0..1
+
+    const db = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+    $("dbTxt").textContent = `~ dB: ${isFinite(db)? db.toFixed(1): "-∞"}`;
+  }else{
+    // 闭麦或未初始化：把电平视为 0，并显示 -∞
+    level = 0;
+    $("dbTxt").textContent = `~ dB: -∞`;
   }
-  let rms = Math.sqrt(sum / timeBuf.length);   // 0..~1
-  let level = Math.min(1, Math.max(0, rms * sens * 3)); // 放大到更直观的 0..1
 
   $("lvlTxt").textContent = `level: ${level.toFixed(3)}`;
-  const db = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
-  $("dbTxt").textContent = `~ dB: ${isFinite(db)? db.toFixed(1): "-∞"}`;
   $("meterBar").style.width = `${Math.min(100, level*100)}%`;
 
   // 有效输入刷新计时
@@ -199,6 +216,49 @@ function triggerHappy(){
   lastInputAt = now;
   switchTo("happy");
 }
+
+async function toggleMute(){
+  if(!started){
+    // 尚未启动就先启动，避免用户误触
+    await startAll();
+  }
+  setMuted(!isMuted);
+}
+
+function setMuted(on){
+  isMuted = on;
+  const btn = $("muteBtn");
+
+  if(isMuted){
+    // 停掉采集流与分析器
+    if(mediaStream){
+      mediaStream.getTracks().forEach(t=>t.stop());
+      mediaStream = null;
+    }
+    if(sourceNode){
+      try{ sourceNode.disconnect(); }catch{}
+      sourceNode = null;
+    }
+    analyser = null; // draw 将读不到音量
+    $("meterBar").style.width = "0%";
+    $("micTxt").textContent = "mic: muted";
+    btn.textContent = "Unmute Mic";
+    btn.classList.add("muted");
+  }else{
+    // 重新按当前选择的设备开启
+    startMicWithDevice(($("micSelect").value || undefined))
+      .then(()=>{
+        $("micTxt").textContent = "mic: ready";
+      })
+      .catch((err)=>{
+        console.error(err);
+        $("micTxt").textContent = "mic: error";
+      });
+    btn.textContent = "Mute Mic";
+    btn.classList.remove("muted");
+  }
+}
+
 
 function switchTo(name, opts = {resetTime:true}){
   if(current === name) return;
