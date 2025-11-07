@@ -1,11 +1,12 @@
-// ====== 基本参数 ======
-const SLEEP_AFTER_MS = 30000;   // 30s 无输入进入 sleep
-const SHY_HOLD_MS    = 1200;    // shy 显示 1.2s
-const HAPPY_HOLD_MS  = 1200;    // happy 显示 1.2s
-const SOFT_TH   = 0.02;         // 轻环境声阈值
-const LOUD_TH   = 0.12;         // 突然大声阈值
+// ====== Tunables ======
+let SLEEP_AFTER_MS = 30000;
+let SHY_HOLD_MS    = 1200;
+let HAPPY_HOLD_MS  = 1200;
 
-let mic, amp;
+// thresholds 可调或校准
+let SOFT_TH = 0.02;
+let LOUD_TH = 0.12;
+
 let videos = {};
 let current = "live";
 let lastInputAt = 0;
@@ -14,21 +15,27 @@ let happyUntil = 0;
 let allLoaded = false;
 let started = false;
 
-function preload(){}
+let sens = 1.0;
+
+// Web Audio
+let audioCtx, analyser, mediaStream, sourceNode;
+let timeBuf;
+
+// UI refs
+const $ = (id)=>document.getElementById(id);
 
 function setup(){
-  // 用 p5 只做音频输入和时序，画面用 <video>
   noCanvas();
 
-  // 准备 4 个视频元素
-  const stage = document.getElementById("stage");
+  // build videos
+  const stage = $("stage");
   ["live","happy","sleep","shy"].forEach(name=>{
     const v = document.createElement("video");
     v.id = `vid-${name}`;
     v.src = `assets/${name}.mp4`;
     v.loop = true;
-    v.muted = true;        // 为了移动端自动播放
-    v.playsInline = true;  // iOS 原生内联
+    v.muted = true;
+    v.playsInline = true;
     v.preload = "auto";
     v.setAttribute("webkit-playsinline","true");
     v.setAttribute("x5-playsinline","true");
@@ -37,60 +44,140 @@ function setup(){
     videos[name] = v;
   });
 
-  // 初始只显示 live
   switchTo("live", {resetTime:false});
-  document.getElementById("loading").style.display = "block";
+  $("loading").style.display = "block";
 
-  // 点击屏幕任意处触发 happy
   stage.addEventListener("pointerdown", ()=>{
-    if(!started) return; // 等用户点击 start
+    resumeAudio();
+    if(!started) return;
     triggerHappy();
   });
 
-  // Start 按钮：解锁音频权限 + 开始麦克风
-  const startBtn = document.getElementById("startBtn");
-  startBtn.addEventListener("click", async ()=>{
-    if(started) return;
-    started = true;
-    // 解锁音频
-    await userStartAudio().catch(()=>{});
-    mic = new p5.AudioIn();
-    mic.start(()=>{}, ()=>{});
-    amp = new p5.Amplitude();
-    amp.setInput(mic);
+  $("startBtn").addEventListener("click", startAll);
 
-    // 开始播放所有视频以便缓存，并立即切回当前状态
-    Object.values(videos).forEach(v=>{ v.play().catch(()=>{}); v.pause(); });
-    switchTo("live");
+  // 控制面板
+  $("sens").addEventListener("input", e=> sens = parseFloat(e.target.value));
+  $("softTH").addEventListener("input", e=> SOFT_TH = parseFloat(e.target.value));
+  $("loudTH").addEventListener("input", e=> LOUD_TH = parseFloat(e.target.value));
+  $("calBtn").addEventListener("click", calibrate2s);
 
-    // UI
-    startBtn.style.display = "none";
+  // 设备选择
+  $("refreshBtn").addEventListener("click", listMics);
+  $("micSelect").addEventListener("change", async ()=>{
+    if(started) await startMicWithDevice(($("micSelect").value));
+  });
+
+  window.addEventListener("pointerdown", resumeAudio, { passive:true });
+  window.addEventListener("touchstart", resumeAudio, { passive:true });
+  window.addEventListener("keydown", resumeAudio);
+
+  // 预先列设备
+  listMics();
+}
+
+async function startAll(){
+  if(started) return;
+  started = true;
+  $("startBtn").disabled = true;
+
+  await resumeAudio();
+  await startMicWithDevice(($("micSelect").value || undefined)).catch(console.error);
+
+  // warm up videos
+  Object.values(videos).forEach(v=>{ v.play().catch(()=>{}); v.pause(); });
+  switchTo("live");
+  $("startBtn").style.display = "none";
+}
+
+async function listMics(){
+  try{
+    // 需先拿一次权限，设备标签才可见
+    await navigator.mediaDevices.getUserMedia({ audio:true });
+  }catch{}
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const mics = devices.filter(d => d.kind === "audioinput");
+  const sel = $("micSelect");
+  sel.innerHTML = "";
+  mics.forEach(d=>{
+    const opt = document.createElement("option");
+    opt.value = d.deviceId;
+    opt.text = d.label || `Microphone ${sel.length+1}`;
+    sel.appendChild(opt);
   });
 }
 
+async function startMicWithDevice(deviceId){
+  // 清理旧流
+  if(mediaStream){
+    mediaStream.getTracks().forEach(t=>t.stop());
+    mediaStream = null;
+  }
+  if(sourceNode){
+    try{ sourceNode.disconnect(); }catch{}
+    sourceNode = null;
+  }
+  if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  // 获取选中的设备
+  const constraints = {
+    audio: {
+      deviceId: deviceId ? { exact: deviceId } : undefined,
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      channelCount: 1
+    }
+  };
+
+  mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+  sourceNode = audioCtx.createMediaStreamSource(mediaStream);
+
+  // 建 analyser
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 1024; // 1024 样本窗
+  analyser.smoothingTimeConstant = 0.2;
+
+  sourceNode.connect(analyser);
+  // 不接到 destination，避免回授
+  timeBuf = new Float32Array(analyser.fftSize);
+
+  $("micTxt").textContent = "mic: ready";
+}
+
 function checkLoaded(){
-  // 所有视频都到 canplaythrough 后，隐藏 loading 并尝试自动播放可见视频
   const ready = ["live","happy","sleep","shy"].every(n => videos[n].readyState >= 3);
   if(ready && !allLoaded){
     allLoaded = true;
-    document.getElementById("loading").style.display = "none";
-    // 尝试播放当前的视频
+    $("loading").style.display = "none";
     videos[current].play().catch(()=>{});
   }
 }
 
 function draw(){
-  if(!started || !amp) return;
+  if(!started || !analyser) return;
 
   const now = millis();
-  const level = amp.getLevel(); // 0..1
 
-  // 有任何可感知输入就刷新
+  // 从 Analyser 读取时域数据，计算 RMS
+  analyser.getFloatTimeDomainData(timeBuf);
+  let sum = 0;
+  for(let i=0;i<timeBuf.length;i++){
+    const x = timeBuf[i];
+    sum += x*x;
+  }
+  let rms = Math.sqrt(sum / timeBuf.length);   // 0..~1
+  let level = Math.min(1, Math.max(0, rms * sens * 3)); // 放大到更直观的 0..1
+
+  $("lvlTxt").textContent = `level: ${level.toFixed(3)}`;
+  const db = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+  $("dbTxt").textContent = `~ dB: ${isFinite(db)? db.toFixed(1): "-∞"}`;
+  $("meterBar").style.width = `${Math.min(100, level*100)}%`;
+
+  // 有效输入刷新计时
   if(level > SOFT_TH) lastInputAt = now;
 
-  // 优先级：shy > happy > sleep > live
+  // 状态优先级：shy > happy > sleep > live
   if(level >= LOUD_TH){
-    // 大声触发 shy
     shyUntil = now + SHY_HOLD_MS;
     switchTo("shy");
   }else if(now < shyUntil){
@@ -103,8 +190,7 @@ function draw(){
     switchTo("live");
   }
 
-  // HUD
-  document.getElementById("stateTxt").textContent = `state: ${current}`;
+  $("stateTxt").textContent = `state: ${current}`;
 }
 
 function triggerHappy(){
@@ -116,7 +202,6 @@ function triggerHappy(){
 
 function switchTo(name, opts = {resetTime:true}){
   if(current === name) return;
-  // 显示 name，隐藏其他
   Object.entries(videos).forEach(([key, v])=>{
     if(key === name){
       v.style.display = "block";
@@ -124,17 +209,50 @@ function switchTo(name, opts = {resetTime:true}){
       v.play().catch(()=>{});
     }else{
       v.style.display = "none";
-      // 不 pause，保持缓存热身；也可选择 pause 降低资源
       v.pause();
     }
   });
   current = name;
 }
 
-// 兼容性：没有交互也能开始看到 live 的第一帧
-window.addEventListener("load", ()=>{
-  // 尝试静音自动播一遍加载缓存
-  Object.values(videos).forEach(v=>{ v.play().catch(()=>{}); v.pause(); });
-});
+async function resumeAudio(){
+  try{
+    if(!audioCtx) return;
+    if(audioCtx.state !== "running"){
+      await audioCtx.resume();
+      $("micTxt").textContent = "mic: resumed";
+    }
+  }catch{}
+}
 
-function windowResized(){}
+// 2 秒校准：测环境噪声，动态设置门限
+async function calibrate2s(){
+  if(!analyser) return;
+  $("calBtn").disabled = true;
+  $("micTxt").textContent = "mic: calibrating…";
+
+  const start = millis();
+  const samples = [];
+  while(millis() - start < 2000){
+    analyser.getFloatTimeDomainData(timeBuf);
+    let sum = 0;
+    for(let i=0;i<timeBuf.length;i++){ sum += timeBuf[i]*timeBuf[i]; }
+    const rms = Math.sqrt(sum / timeBuf.length);
+    samples.push(rms);
+    await new Promise(r=>setTimeout(r, 30));
+  }
+  const mean = samples.reduce((a,b)=>a+b,0) / samples.length;
+  const std  = Math.sqrt(samples.reduce((s,x)=>s + (x-mean)*(x-mean),0)/samples.length);
+
+  // 软门 = 均值 + 2σ；大声 = 软门 * 4
+  SOFT_TH = clamp((mean + 2*std) * 3 * sens, 0.005, 0.08);
+  LOUD_TH = clamp(SOFT_TH * 4, 0.08, 0.4);
+
+  $("softTH").value = SOFT_TH.toFixed(3);
+  $("loudTH").value = LOUD_TH.toFixed(2);
+  $("micTxt").textContent = `mic: calibrated (soft ${SOFT_TH.toFixed(3)} / loud ${LOUD_TH.toFixed(2)})`;
+
+  $("calBtn").disabled = false;
+}
+
+function clamp(x,a,b){ return Math.max(a, Math.min(b, x)); }

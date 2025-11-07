@@ -22,3 +22,31 @@ html,body{margin:0;padding:0;background:#f4f7f6;font-family:system-ui;}
 #guide ol,#guide ul{margin:8px 0 0 18px; padding:0;}
 #guide li{margin:4px 0;}
 #guide b{color:#0a7f66;}
+
+/*test2*/
+#hud{
+  display:flex; gap:12px; flex-wrap:wrap;
+  font-size:12px; color:#2d2d2d; opacity:.8; margin-top:8px;
+}
+#panel{
+  width:min(92vmin,640px);
+  background:#fff; border:1px solid #e9ecef; border-radius:12px;
+  padding:10px 14px; box-shadow:0 4px 16px rgba(0,0,0,.05);
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+}
+#panel label{font-size:12px; color:#333; display:flex; align-items:center; gap:6px}
+#panel input[type=range]{width:160px}
+#meterWrap{
+  flex:1; height:10px; background:#eef4f2; border-radius:10px; overflow:hidden; min-width:120px;
+}
+#meterBar{height:100%; width:0%; background:#0a7f66;}
+#tips{font-size:12px; color:#5b5b5b}
+#guide{
+  width:min(92vmin,640px);
+  background:#fff; border:1px solid #e9ecef; border-radius:12px;
+  padding:10px 14px; box-shadow:0 4px 16px rgba(0,0,0,.05); margin-top:8px;
+}
+#guide summary{font-weight:600; cursor:pointer; outline:none;}
+#guide ol,#guide ul{margin:8px 0 0 18px; padding:0;}
+#guide li{margin:4px 0;}
+#guide b{color:#0a7f66;}
